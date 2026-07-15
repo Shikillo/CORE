@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Core</title>
+  <link rel="stylesheet" href="core.css" />
+</head>
+<body>
+  <!-- Splash de arranque: logo ASCII revelado de abajo arriba (como Garita). -->
+  <div id="splash"><pre id="splash-art" aria-hidden="true"></pre></div>
+
+  <!-- La interfaz entera; el webview de cada pestaña flota sobre el hueco
+       del bloque «navegador» (la geometría la calca el backend en main.rs). -->
+  <div id="app">
+
+    <!-- columna de navegación (iconos SVG monocromos, teñidos por CSS) -->
+    <section class="block" id="blk-nav">
+      <button class="btn" id="go-back" title="atrás">
+        <span class="icon" style="--icon: url('assets/icons/back.svg')"></span>
+      </button>
+      <button class="btn" id="go-forward" title="adelante">
+        <span class="icon" style="--icon: url('assets/icons/forth.svg')"></span>
+      </button>
+      <button class="btn" id="go-reload" title="recargar">
+        <span class="icon" style="--icon: url('assets/icons/reload.svg')"></span>
+      </button>
+      <div class="nav-sep"></div>
+      <button class="btn" id="go-home" title="a la página inicial">
+        <span class="icon" style="--icon: url('assets/icons/home.svg')"></span>
+      </button>
+      <button class="btn" id="theme" title="tema: papel y tinta a tu gusto">
+        <span class="icon" style="--icon: url('assets/icons/tema.svg')"></span>
+      </button>
+      <button class="btn" id="history" title="historial">
+        <span class="icon" style="--icon: url('assets/icons/historial.svg')"></span>
+      </button>
+      <button class="btn" id="downloads" title="descargas">
+        <span class="icon" style="--icon: url('assets/icons/download.svg')"></span>
+      </button>
+      <button class="btn" id="help" title="atajos">
+        <span class="icon" style="--icon: url('assets/icons/info.svg')"></span>
+      </button>
+    </section>
+
+    <div id="center">
+      <!-- barra de búsqueda -->
+      <section class="block" id="blk-search">
+        <span class="block-title">dirección</span>
+        <span class="icon" id="search-icon" aria-hidden="true"
+              style="--icon: url('assets/icons/searchbar.svg')"></span>
+        <input id="url" type="text" spellcheck="false" autocomplete="off"
+               placeholder="dirección o búsqueda…" />
+        <span id="spinner" aria-hidden="true">·</span>
+      </section>
+
+      <!-- el navegador: bloque vacío; la página vive encima -->
+      <section class="block" id="blk-browser">
+        <span class="block-title" id="browser-title">navegador</span>
+      </section>
+    </div>
+
+    <!-- columna derecha: pestañas arriba, marcadores debajo, barra de carga al pie -->
+    <div id="right">
+      <section class="block" id="blk-tabs">
+        <span class="block-title">pestañas</span>
+        <ul id="tab-list"></ul>
+        <div class="add-row">
+          <button class="btn" id="tab-new" title="abrir pestaña">+ nueva</button>
+        </div>
+      </section>
+
+      <section class="block" id="blk-marks">
+        <span class="block-title">marcadores</span>
+        <ul id="mark-list"></ul>
+        <div class="add-row">
+          <button class="btn" id="mark-add" title="guardar la página actual">+ guardar</button>
+        </div>
+      </section>
+
+      <section class="block" id="blk-load">
+        <span class="block-title">carga</span>
+        <div id="load-track"><div id="load-fill"></div></div>
+      </section>
+    </div>
+
+  </div>
+
+  <!-- Velo y diálogos, como en Garita. Ojo: las páginas (webviews hijos)
+       flotan ENCIMA de la ui, así que mientras un diálogo esté abierto la
+       pestaña activa se esconde (command shade). -->
+  <div id="overlay" class="hidden">
+    <div class="dlg block hidden" id="dlg-theme">
+      <span class="block-title">tema</span>
+      <p class="dimmed">Elige el color del papel (fondo) y el de la tinta (texto);
+        los tonos intermedios se calculan solos. Se aplica también a las páginas
+        y se recuerda entre sesiones.</p>
+      <div class="add-row">
+        <label class="theme-pick">papel <input type="color" id="theme-paper" /></label>
+        <label class="theme-pick">tinta <input type="color" id="theme-ink" /></label>
+        <button class="btn" id="theme-swap" title="intercambiar papel y tinta">⇄</button>
+      </div>
+      <div class="add-row">
+        <span class="dimmed">presets:</span>
+        <button class="btn" id="theme-light">claro</button>
+        <button class="btn" id="theme-dark">oscuro</button>
+      </div>
+      <div class="add-row right">
+        <button class="btn btn-primary" data-close>cerrar</button>
+      </div>
+    </div>
+
+    <div class="dlg block hidden" id="dlg-history">
+      <span class="block-title">historial</span>
+      <ul id="history-list" class="select-list"></ul>
+      <div class="add-row right">
+        <button class="btn" id="history-clear">vaciar</button>
+        <button class="btn btn-primary" data-close>cerrar</button>
+      </div>
+    </div>
+
+    <div class="dlg block hidden" id="dlg-help">
+      <span class="block-title">atajos</span>
+      <div class="help-grid">
+        <b>⌘T</b><span>pestaña nueva</span>
+        <b>⌘W</b><span>cerrar pestaña</span>
+        <b>⌘R</b><span>recargar</span>
+        <b>⌘[</b><span>atrás</span>
+        <b>⌘]</b><span>adelante</span>
+        <b>⇧⌘H</b><span>página inicial</span>
+        <b>⌘L</b><span>escribir dirección</span>
+        <b>⌘H</b><span>historial</span>
+        <b>⌘J</b><span>descargas</span>
+        <b>⌘,</b><span>tema</span>
+        <b>⌘/ · ⇧?</b><span>estos atajos</span>
+        <b>esc</b><span>cerrar el diálogo</span>
+      </div>
+      <div class="add-row right">
+        <button class="btn btn-primary" data-close>cerrar</button>
+      </div>
+    </div>
+
+    <div class="dlg block hidden" id="dlg-downloads">
+      <span class="block-title">descargas</span>
+      <ul id="downloads-list" class="select-list"></ul>
+      <div class="add-row right">
+        <button class="btn" id="downloads-clear">vaciar</button>
+        <button class="btn btn-primary" data-close>cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

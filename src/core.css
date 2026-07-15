@@ -1,0 +1,362 @@
+/* Core — interfaz «papel y tinta», heredera de la estética de Garita.
+   GEOMETRÍA CALCADA EN main.rs (hole()): márgenes 18/12/12, nav 44px,
+   pestañas 180px, barra 40px, separación 12px. Si cambia aquí, cambia allí. */
+
+:root {
+  --paper: #f6f1e5;
+  --ink: #23211b;
+  --ink-dim: #8b8474;
+  --ink-faint: #cec7b4;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--paper);
+  /* El mismo grano sutil del papel. */
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.52 0 0 0 0 0.45 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  color: var(--ink);
+  /* Mono de cada casa: Menlo/Monaco (macOS), Consolas (Windows), DejaVu (Linux). */
+  font-family: Menlo, Monaco, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 14px;
+  user-select: none;
+  cursor: default;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  padding: 18px 12px 12px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 180px;
+  gap: 12px;
+}
+
+#center {
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+/* --- Bloques, como en Garita: borde de tinta y título flotante ------------------- */
+
+.block {
+  position: relative;
+  border: 1px solid var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.block-title {
+  position: absolute;
+  top: -0.8em;
+  left: 10px;
+  background: var(--paper);
+  padding: 0 7px;
+  white-space: nowrap;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Columna de navegación -------------------------------------------------------- */
+
+#blk-nav {
+  align-items: center;
+  padding: 10px 0;
+}
+
+.btn {
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 2px 6px;
+  cursor: default;
+}
+.btn:hover { background: var(--ink-faint); }
+.btn:active { background: var(--ink); color: var(--paper); }
+.btn.active { background: var(--ink); color: var(--paper); }
+
+#blk-nav .btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-sep { flex: 1; }
+
+/* Iconos (SVG monocromo como máscara: se tiñen con el color actual, como en Garita). */
+.icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background-color: currentColor;
+  -webkit-mask: var(--icon) no-repeat center / contain;
+  mask: var(--icon) no-repeat center / contain;
+}
+
+/* --- Barra de búsqueda -------------------------------------------------------------- */
+
+#blk-search {
+  flex-direction: row;
+  align-items: center;
+  padding: 0 10px;
+}
+#search-icon { color: var(--ink-dim); }
+
+#url {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  padding: 3px 4px;
+  user-select: text;
+  cursor: text;
+}
+#url:focus { outline: none; }
+#url::placeholder { color: var(--ink-dim); }
+
+/* Punto de carga: invisible en reposo, parpadea mientras carga la activa. */
+#spinner {
+  width: 1ch;
+  text-align: center;
+  visibility: hidden;
+}
+body.loading #spinner {
+  visibility: visible;
+  animation: blink 0.8s steps(2, start) infinite;
+}
+@keyframes blink { to { visibility: hidden; } }
+
+/* --- Columna de pestañas y marcadores -------------------------------------------------- */
+
+/* Pestañas arriba, marcadores debajo (a mitades) y la barra de carga al pie. */
+#right {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) 40px;
+  gap: 12px;
+  min-height: 0;
+}
+
+#blk-tabs, #blk-marks { padding: 12px 8px 8px; }
+
+#tab-list, #mark-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#tab-list li, #mark-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  overflow: hidden;
+}
+#tab-list li.selected { background: var(--ink); color: var(--paper); }
+#mark-list li:not(.empty):hover { background: var(--ink-faint); }
+#mark-list li.empty { color: var(--ink-dim); }
+#tab-list li .tab-title, #mark-list li .tab-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#tab-list li .tab-close, #mark-list li .tab-close {
+  flex: none;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0 2px;
+  visibility: hidden;
+}
+#tab-list li:hover .tab-close,
+#mark-list li:hover .tab-close,
+#tab-list li.selected .tab-close { visibility: visible; }
+#tab-list li .tab-close:hover,
+#mark-list li .tab-close:hover { background: var(--ink-faint); color: var(--ink); }
+
+.add-row { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.add-row.right { justify-content: flex-end; }
+#blk-tabs .add-row, #blk-marks .add-row { justify-content: center; padding-top: 6px; }
+
+/* --- Barra de carga (bajo las pestañas) ------------------------------------------------ */
+
+#blk-load {
+  flex-direction: row;
+  align-items: center;
+  padding: 0 10px;
+}
+#load-track {
+  flex: 1;
+  border: 1px solid var(--ink);
+  height: 12px;
+  padding: 1px;
+}
+#load-fill {
+  background: var(--ink);
+  height: 100%;
+  width: 0%;
+}
+
+/* --- Bloque del navegador ------------------------------------------------------------ */
+
+/* Vacío a propósito: la página (webview hijo) flota encima, con 8px de
+   respiro (INSET) para que el borde y el título del bloque respiren. */
+#blk-browser { background: transparent; }
+
+/* --- Diálogos (copiados de Garita) ----------------------------------------------------- */
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(35, 33, 27, 0.25);
+  display: flex;
+  align-items: flex-end; /* los diálogos surgen desde el borde inferior */
+  justify-content: center;
+  overflow: hidden;
+  z-index: 100;
+  animation: overlay-fade 0.2s ease-out;
+}
+#overlay.hidden { display: none; }
+@keyframes overlay-fade { from { background: rgba(35, 33, 27, 0); } }
+body.dark #overlay { background: rgba(0, 0, 0, 0.45); }
+
+.dlg {
+  min-width: 380px;
+  max-width: 560px;
+  background: var(--paper);
+  box-shadow: 5px -5px 0 rgba(35, 33, 27, 0.35);
+  padding: 14px 12px 10px;
+  /* Hueco para el rótulo, que sobresale 0.8em por encima del borde. */
+  margin-top: 1em;
+  gap: 8px;
+  will-change: transform;
+  animation: dlg-slide-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+body.dark .dlg { box-shadow: 5px -5px 0 rgba(0, 0, 0, 0.5); }
+/* Cierre: se desliza de vuelta hacia abajo (la clase la pone closeDialogs). */
+.dlg.closing { animation: dlg-slide-down 0.18s cubic-bezier(0.6, 0, 0.9, 0.4) forwards; }
+@keyframes dlg-slide-up { from { transform: translateY(102%); } }
+@keyframes dlg-slide-down { to { transform: translateY(102%); } }
+@media (prefers-reduced-motion: reduce) {
+  #overlay, .dlg, .dlg.closing { animation: none; }
+}
+.dlg.hidden { display: none; }
+.dlg p { margin: 4px 0; }
+
+.dimmed { color: var(--ink-dim); }
+
+/* Rejilla del diálogo de atajos (como en Garita). */
+.help-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 16px;
+  font-size: 0.9em;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 2px 4px;
+}
+.help-grid b { white-space: nowrap; }
+.help-grid span { color: var(--ink-dim); }
+.btn-primary { background: var(--ink); color: var(--paper); }
+.hidden { display: none !important; }
+
+/* --- Listas de los desplegables (historial, descargas) --------------------------------- */
+
+#dlg-history, #dlg-downloads { width: min(560px, 92vw); }
+
+.select-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 300px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.select-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  overflow: hidden;
+}
+.select-list li:hover { background: var(--ink-faint); }
+.select-list li.empty { color: var(--ink-dim); }
+.select-list li.empty:hover { background: none; }
+
+.hist-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-url { max-width: 38%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-when { flex: none; white-space: nowrap; }
+
+.dl-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-state { flex: none; white-space: nowrap; }
+
+/* --- Splash de arranque (logo ASCII revelado de abajo arriba, como Garita) ------------- */
+
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: var(--paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.35s ease;
+}
+#splash.done { opacity: 0; pointer-events: none; }
+/* El logo, enmarcado justo: la línea exterior abraza las letras con un
+   respiro, como un bloque más. */
+#splash pre {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--ink);
+  white-space: pre;
+  border: 1px solid var(--ink);
+  padding: 16px 20px;
+}
+/* Cada fila aparece de golpe (sin moverse) cuando le llega su turno;
+   el retardo por fila lo pone runSplash() de abajo hacia arriba. */
+.splash-line {
+  opacity: 0;
+  animation: splash-line-in 1ms steps(1, end) forwards;
+}
+@keyframes splash-line-in {
+  to { opacity: 1; }
+}
+
+/* --- Tema (selector de papel y tinta) -------------------------------------------------- */
+
+.theme-pick { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; }
+input[type="color"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 46px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 1px; }
+input[type="color"]::-webkit-color-swatch { border: none; }
+#theme-swap { margin-left: auto; }
