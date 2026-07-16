@@ -57,18 +57,6 @@ cargo tauri dev
 
 (Requiere `tauri-cli` 2.x: `cargo install tauri-cli`.)
 
-## Instaladores
-
-Cada vez que se empuja una tag `v*` (p. ej. `v0.1.1`), GitHub Actions compila
-el bundle de cada sistema —macOS arm64 e Intel, Windows y Linux— y publica la
-release con los instaladores adjuntos (`.dmg`, `.msi`/`.exe`, `.deb`/`.rpm`/
-`.AppImage`). El flujo está en `.github/workflows/release.yml`.
-
-```sh
-git tag v0.1.1
-git push origin v0.1.1
-```
-
 ## Arquitectura
 
 - `src-tauri/src/main.rs` — todo el backend: ventana + webview de interfaz +
@@ -81,16 +69,6 @@ git push origin v0.1.1
   una, debe cambiar la otra.
 - `src/` — la interfaz: `index.html`, `core.css`, `app.js` y `assets/`
   (iconos SVG y el sonido de arranque).
-
-## Limitaciones conocidas (v0.1)
-
-- La API multiwebview de Tauri está marcada como *unstable*.
-- Los popups y `target="_blank"` no abren pestaña nueva (se ignoran).
-- Sin historial persistente entre reinicios más allá de lo guardado.
-- El modo tinta es una fotocopia a la fuerza: en webs de texto queda
-  precioso; en apps web complejas puede romper la maquetación. Apagarlo
-  (`◐`) muestra la web original (con un parpadeo re-tintado al cargar).
-- Atrás/adelante usan `history.back()/forward()` del propio webview.
 
 ## Créditos
 
