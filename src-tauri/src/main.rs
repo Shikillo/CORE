@@ -423,7 +423,12 @@ fn spawn_tab(app: &AppHandle, url: Url) -> Result<String, String> {
         // apunte a un dominio de publicidad (popups): esa se deniega a secas.
         .on_new_window(move |url, _features| {
             if !is_ad_url(&url) {
-                let _ = spawn_tab(&nw_handle, url);
+                // En un hilo aparte: crear el webview desde el hilo del event
+                // loop cuelga WebView2 en Windows (ver nota en los commands).
+                let h = nw_handle.clone();
+                std::thread::spawn(move || {
+                    let _ = spawn_tab(&h, url);
+                });
             }
             NewWindowResponse::Deny
         })
@@ -554,7 +559,7 @@ fn layout(app: &AppHandle) {
 /// La UI comunica el rectángulo medido del hueco (px lógicos, ya con el
 /// respiro descontado); recolocamos la pestaña activa al momento.
 #[tauri::command]
-fn set_hole(app: AppHandle, tabs: State<TabsState>, x: f64, y: f64, w: f64, h: f64) {
+async fn set_hole(app: AppHandle, tabs: State<'_, TabsState>, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
     println!("[core] hueco medido por la ui: x={x:.0} y={y:.0} {w:.0}×{h:.0}");
     if let Some(u) = app.get_webview("ui") {
         if let (Ok(p), Ok(s)) = (u.position(), u.size()) {
@@ -570,40 +575,50 @@ fn set_hole(app: AppHandle, tabs: State<TabsState>, x: f64, y: f64, w: f64, h: f
             println!("[core] pestaña activa en física: {},{} {}×{}", p.x, p.y, s.width, s.height);
         }
     }
+    Ok(())
 }
 
 // --- Commands (los invoca la ui) ---------------------------------------------
 
+// IMPORTANTE (Windows): los métodos de ventana/webview (crear, navegar, mover,
+// mostrar…) se cuelgan si se llaman en el hilo del event loop. Los commands
+// van por eso `async` — Tauri los ejecuta fuera del hilo principal, y desde
+// ahí `add_child` y compañía funcionan. En macOS/Linux es indiferente. Por lo
+// mismo, `select_tab`/`close_tab` tienen una versión `_impl` síncrona: así se
+// pueden encadenar entre sí (y llamarse desde un hilo en los manejadores de
+// eventos) sin volver a pasar por la capa de command.
+
 #[tauri::command]
-fn navigate(app: AppHandle, tabs: State<TabsState>, url: String) -> Result<(), String> {
+async fn navigate(app: AppHandle, tabs: State<'_, TabsState>, url: String) -> Result<(), String> {
     let url = to_url(&url)?;
     active_webview(&app, &tabs)?.navigate(url).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn nav_back(app: AppHandle, tabs: State<TabsState>) -> Result<(), String> {
+async fn nav_back(app: AppHandle, tabs: State<'_, TabsState>) -> Result<(), String> {
     active_webview(&app, &tabs)?.eval("history.back()").map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn nav_forward(app: AppHandle, tabs: State<TabsState>) -> Result<(), String> {
+async fn nav_forward(app: AppHandle, tabs: State<'_, TabsState>) -> Result<(), String> {
     active_webview(&app, &tabs)?.eval("history.forward()").map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn nav_reload(app: AppHandle, tabs: State<TabsState>) -> Result<(), String> {
+async fn nav_reload(app: AppHandle, tabs: State<'_, TabsState>) -> Result<(), String> {
     active_webview(&app, &tabs)?.reload().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn new_tab(app: AppHandle) -> Result<String, String> {
+async fn new_tab(app: AppHandle) -> Result<String, String> {
     let home = home_url(&app);
     spawn_tab(&app, home)
 }
 
-#[tauri::command]
-fn select_tab(app: AppHandle, tabs: State<TabsState>, label: String) -> Result<(), String> {
+/// Activa `label`: esconde la anterior, coloca esta en el hueco y la muestra.
+fn select_tab_impl(app: &AppHandle, label: String) -> Result<(), String> {
     let window = app.get_window("main").ok_or("sin ventana")?;
+    let tabs = app.state::<TabsState>();
     let mut t = tabs.0.lock().unwrap();
     if !t.order.contains(&label) {
         return Err("pestaña desconocida".into());
@@ -618,21 +633,27 @@ fn select_tab(app: AppHandle, tabs: State<TabsState>, label: String) -> Result<(
     t.active = Some(label.clone());
     drop(t);
     if let Some(w) = app.get_webview(&label) {
-        let (pos, size) = hole(&app, &window);
+        let (pos, size) = hole(app, &window);
         let _ = w.set_position(pos);
         let _ = w.set_size(size);
         let _ = w.show();
     }
-    ui_eval(&app, format!("coreTabSelected({})", serde_json::to_string(&label).unwrap()));
+    ui_eval(app, format!("coreTabSelected({})", serde_json::to_string(&label).unwrap()));
     Ok(())
 }
 
 #[tauri::command]
-fn close_tab(app: AppHandle, tabs: State<TabsState>, label: String) -> Result<(), String> {
+async fn select_tab(app: AppHandle, label: String) -> Result<(), String> {
+    select_tab_impl(&app, label)
+}
+
+/// Cierra `label`; si era la activa, pasa a la vecina (o abre casa si no queda).
+fn close_tab_impl(app: &AppHandle, label: String) -> Result<(), String> {
     if let Some(w) = app.get_webview(&label) {
         let _ = w.close();
     }
     let next = {
+        let tabs = app.state::<TabsState>();
         let mut t = tabs.0.lock().unwrap();
         let Some(i) = t.order.iter().position(|l| l == &label) else {
             return Err("pestaña desconocida".into());
@@ -645,20 +666,25 @@ fn close_tab(app: AppHandle, tabs: State<TabsState>, label: String) -> Result<()
             None // la activa no cambia: no hay que recolocar nada
         }
     };
-    ui_eval(&app, format!("coreTabClosed({})", serde_json::to_string(&label).unwrap()));
+    ui_eval(app, format!("coreTabClosed({})", serde_json::to_string(&label).unwrap()));
     if let Some(next) = next {
-        select_tab(app.clone(), app.state::<TabsState>(), next)?;
+        select_tab_impl(app, next)?;
     } else if app.state::<TabsState>().0.lock().unwrap().order.is_empty() {
         // Sin pestañas no hay navegador: abrir una casa nueva.
-        let home = home_url(&app);
-        spawn_tab(&app, home)?;
+        let home = home_url(app);
+        spawn_tab(app, home)?;
     }
     Ok(())
 }
 
+#[tauri::command]
+async fn close_tab(app: AppHandle, label: String) -> Result<(), String> {
+    close_tab_impl(&app, label)
+}
+
 /// Lleva la pestaña activa a la página inicial (papel en blanco).
 #[tauri::command]
-fn nav_home(app: AppHandle, tabs: State<TabsState>) -> Result<(), String> {
+async fn nav_home(app: AppHandle, tabs: State<'_, TabsState>) -> Result<(), String> {
     let home = home_url(&app);
     active_webview(&app, &tabs)?.navigate(home).map_err(|e| e.to_string())
 }
@@ -671,7 +697,7 @@ fn valid_hex(c: &str) -> bool {
 /// La ui manda el tema (papel y tinta): se guarda y se re-tintan todas las
 /// pestañas al momento (el init script reescribe la hoja con replaceSync).
 #[tauri::command]
-fn set_theme(app: AppHandle, tabs: State<TabsState>, paper: String, ink: String) -> Result<(), String> {
+async fn set_theme(app: AppHandle, tabs: State<'_, TabsState>, paper: String, ink: String) -> Result<(), String> {
     if !valid_hex(&paper) || !valid_hex(&ink) {
         return Err("color inválido: se espera #rrggbb".into());
     }
@@ -727,11 +753,12 @@ fn open_path(path: String, reveal: bool) {
 /// webview que queda POR DEBAJO de las páginas: mientras haya uno abierto,
 /// la página se aparta para no taparlo.
 #[tauri::command]
-fn shade(app: AppHandle, tabs: State<TabsState>, on: bool) {
+async fn shade(app: AppHandle, tabs: State<'_, TabsState>, on: bool) -> Result<(), String> {
     let active = tabs.0.lock().unwrap().active.clone();
     if let Some(w) = active.and_then(|l| app.get_webview(&l)) {
         let _ = if on { w.hide() } else { w.show() };
     }
+    Ok(())
 }
 
 fn main() {
@@ -818,60 +845,66 @@ fn main() {
                     .build()?;
                 app.set_menu(menu)?;
                 app.on_menu_event(|app, event| {
-                    let id = event.id().as_ref();
-                    // Los diálogos viven en la ui: abrirlo y darle el foco
-                    // (para que esc y los clicks caigan allí, no en la página).
-                    if id.starts_with("dlg-") {
-                        if let Some(ui) = app.get_webview("ui") {
-                            let _ = ui.set_focus();
-                            let _ = ui.eval(format!(
-                                "coreMenu({})",
-                                serde_json::to_string(id).unwrap()
-                            ));
-                        }
-                        return;
-                    }
-                    let tabs = app.state::<TabsState>();
-                    match id {
-                        "back" => {
-                            if let Ok(w) = active_webview(app, &tabs) {
-                                let _ = w.eval("history.back()");
-                            }
-                        }
-                        "forward" => {
-                            if let Ok(w) = active_webview(app, &tabs) {
-                                let _ = w.eval("history.forward()");
-                            }
-                        }
-                        "reload" => {
-                            if let Ok(w) = active_webview(app, &tabs) {
-                                let _ = w.reload();
-                            }
-                        }
-                        "home" => {
-                            let home = home_url(app);
-                            if let Ok(w) = active_webview(app, &tabs) {
-                                let _ = w.navigate(home);
-                            }
-                        }
-                        "url" => {
+                    let id = event.id().as_ref().to_string();
+                    let app = app.clone();
+                    // En un hilo aparte: navegar/crear/cerrar/enfocar desde el
+                    // hilo del event loop cuelga WebView2 en Windows (misma nota
+                    // que en los commands async). En mac/Linux es indiferente.
+                    std::thread::spawn(move || {
+                        // Los diálogos viven en la ui: abrirlo y darle el foco
+                        // (para que esc y los clicks caigan allí, no en la página).
+                        if id.starts_with("dlg-") {
                             if let Some(ui) = app.get_webview("ui") {
                                 let _ = ui.set_focus();
-                                let _ = ui.eval("coreFocusUrl()");
+                                let _ = ui.eval(format!(
+                                    "coreMenu({})",
+                                    serde_json::to_string(&id).unwrap()
+                                ));
                             }
+                            return;
                         }
-                        "tab-new" => {
-                            let home = home_url(app);
-                            let _ = spawn_tab(app, home);
-                        }
-                        "tab-close" => {
-                            let label = tabs.0.lock().unwrap().active.clone();
-                            if let Some(label) = label {
-                                let _ = close_tab(app.clone(), app.state(), label);
+                        let tabs = app.state::<TabsState>();
+                        match id.as_str() {
+                            "back" => {
+                                if let Ok(w) = active_webview(&app, &tabs) {
+                                    let _ = w.eval("history.back()");
+                                }
                             }
+                            "forward" => {
+                                if let Ok(w) = active_webview(&app, &tabs) {
+                                    let _ = w.eval("history.forward()");
+                                }
+                            }
+                            "reload" => {
+                                if let Ok(w) = active_webview(&app, &tabs) {
+                                    let _ = w.reload();
+                                }
+                            }
+                            "home" => {
+                                let home = home_url(&app);
+                                if let Ok(w) = active_webview(&app, &tabs) {
+                                    let _ = w.navigate(home);
+                                }
+                            }
+                            "url" => {
+                                if let Some(ui) = app.get_webview("ui") {
+                                    let _ = ui.set_focus();
+                                    let _ = ui.eval("coreFocusUrl()");
+                                }
+                            }
+                            "tab-new" => {
+                                let home = home_url(&app);
+                                let _ = spawn_tab(&app, home);
+                            }
+                            "tab-close" => {
+                                let label = tabs.0.lock().unwrap().active.clone();
+                                if let Some(label) = label {
+                                    let _ = close_tab_impl(&app, label);
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }
+                    });
                 });
             }
 
@@ -889,14 +922,21 @@ fn main() {
                     event,
                     tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
                 ) {
-                    if let Some(ui) = handle.get_webview("ui") {
-                        let scale = win.scale_factor().unwrap_or(1.0);
-                        if let Ok(size) = win.inner_size() {
-                            let s: LogicalSize<f64> = size.to_logical(scale);
-                            let _ = ui.set_size(s);
+                    // En un hilo aparte: redimensionar los webviews desde el hilo
+                    // del event loop cuelga WebView2 en Windows (misma nota que
+                    // en los commands async). En mac/Linux es indiferente.
+                    let handle = handle.clone();
+                    let win = win.clone();
+                    std::thread::spawn(move || {
+                        if let Some(ui) = handle.get_webview("ui") {
+                            let scale = win.scale_factor().unwrap_or(1.0);
+                            if let Ok(size) = win.inner_size() {
+                                let s: LogicalSize<f64> = size.to_logical(scale);
+                                let _ = ui.set_size(s);
+                            }
                         }
-                    }
-                    layout(&handle);
+                        layout(&handle);
+                    });
                 }
             });
             Ok(())
