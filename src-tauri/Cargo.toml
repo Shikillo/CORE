@@ -2,7 +2,7 @@
 # «core» a secas está vedado como nombre de paquete (choca con el crate
 # built-in de Rust): el paquete es core-app y el binario sí se llama core.
 name = "core-app"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Core — navegador-lector mínimo en papel y tinta (Tauri 2, multiwebview)"
 license = "MIT"

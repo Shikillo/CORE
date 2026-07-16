@@ -1,0 +1,56 @@
+# Core — release multiplataforma: al empujar una tag v* se compila el bundle
+# de cada sistema (mac arm64 e intel, windows, linux) y tauri-action publica
+# la release de GitHub con los instaladores adjuntos.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    permissions:
+      contents: write # crear la release y subir los adjuntos
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # arm64 (Apple Silicon)
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest # intel
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04 # deb + rpm + AppImage
+            args: ""
+          - platform: windows-latest # nsis + msi
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: dependencias del sistema (solo linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # En mac se compila para las dos arquitecturas desde el mismo runner.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Core __VERSION__
+          releaseBody: ""
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
